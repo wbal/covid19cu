@@ -6,7 +6,7 @@ Authors@R:
            family = "Baldoquín Rodríguez",
            role = c("aut", "cre"),
            email = "wbadoquin@gmail.com",
-           comment = c(ORCID = "YOUR-ORCID-ID"))
+           comment = c(ORCID = "0000-0001-9231-7109"))
 Description: We are sharing here a few preliminary analysis of public Covid-19 data from Cuba.
 License: What license it uses
 Encoding: UTF-8
