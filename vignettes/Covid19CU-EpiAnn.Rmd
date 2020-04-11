@@ -1,0 +1,200 @@
+---
+title: "Epidemiological Analysis"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+  word_document: default
+---
+
+
+## Epidemiological Analysis
+
+```{r load_data, echo=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+
+
+#library(tidyr)      # using uncount()
+#library(readr)
+#library(incidence) 
+
+
+#readRDS(file = "data/cases-cv19cu.rds")
+
+cases <- readRDS("../data/cases-cv19cu.rds")
+
+#Cuba <- dft2[,c( "id","DateReport", "diagnost","noviajo")]
+
+# pormun <- cases %>% 
+#   mutate( novienedelexterior = is.na( arribo_a_cuba_foco) ) %>% 
+#   group_by(provincia_detección,municipio_detección, DateReport) %>%
+#   summarise( diagnost=n(), noviajo= sum(novienedelexterior )  ) %>%
+#   mutate(import= diagnost-noviajo )
+porprov <- cases %>% 
+  mutate( novienedelexterior = is.na( arribo_a_cuba_foco) ) %>% 
+  group_by(provincia_detección, DateReport) %>%
+  summarise( diagnost=n(), noviajo= sum(novienedelexterior )  ) %>%
+  mutate(import= diagnost-noviajo )  %>% rename( "provincia" =provincia_detección)
+
+  porprov %>% mutate(tipo="local")  %>% filter(noviajo>0) %>% mutate(incid = noviajo)  %>%  bind_rows(porprov %>%  mutate(tipo="imported") %>% filter(import>0) %>% mutate(incid =import ) ) %>%  rename(Date= DateReport) -> prov_tipo
+
+```
+
+## Epidemic curves for each Cuban province
+```{r plot_prov_tipo, echo=FALSE, fig.height=12, fig.width=8, message=FALSE, warning=FALSE, layout="l-body-outset", tidy=TRUE}
+
+png(filename = "../output/Rplot001.png", width = 600, height = 480, units = "px")
+prov_tipo %>%
+  ggplot( aes(x = Date, y = incid,fill= tipo)) +
+      geom_bar(stat="identity") + 
+    facet_wrap(provincia ~.,  ncol=3) + 
+    labs(y="Daily incremental incidence",
+       title="Confirmed cases of COVID-19 in mainland Cuban provinces",
+       subtitle="Note: differing y-axis scales") +
+    theme(legend.position = "top", 
+          strip.text.y = element_text(size=11)) +
+    scale_fill_manual(values = c("orange", "green"))
+
+dev.off()
+```
+![](../output/Rplot001.png){ width=100%, height=100% }
+
+
+The epidemic has spread and covered most of the provinces. Havana, Ciego de Avila, Villa Clara and Matanzas are clearly the most affected. Most of the reacent cases are local transmission.
+
+
+```{r hav_cav_vcl_mtz,echo=FALSE, message=FALSE, warning=FALSE, tidy=TRUE, fig.height=12, fig.width=8, layout="l-body-outset"}
+
+png(filename = "../output/Rplot002.png", width = 600, height = 480, units = "px")
+
+prov_tipo %>% 
+  filter(provincia %in% c("La Habana", "Ciego de Ávila", "Villa Clara", "Matanzas")) %>%
+  ggplot(aes(x=Date, y=incid, fill=tipo)) + 
+  geom_bar(stat="identity") + 
+  facet_wrap(provincia ~., scales = "free_y", ncol=1) + labs(y="Daily incremental incidence",
+                                   title="Confirmed cases of COVID-19 in HAV, CAV, VCL, MTZ",
+                                   subtitle="Note: differing y-axis scales") +
+  theme(legend.position = "top", 
+          strip.text.y = element_text(size=11)) +
+  scale_fill_manual(values = c("orange", "green"))
+dev.off()
+```
+
+![](../output/Rplot002.png){ width=80% }
+
+Incidence does not seam to be falling yet in these provinces.
+
+## Daily incidence of lab-confirmed cases. Cuba from march 11.
+Modelo de Cori et al. 
+
+```{r Cori_model_get_data_cuba, echo=FALSE, tidy=TRUE, message=FALSE}
+cuba_incidence_function_data <-  prov_tipo %>% group_by(Date) %>% summarise(incid = sum(incid) ) %>% select(Date,incid) %>% tidyr::uncount(incid)
+
+cuba_incidence_object <- incidence::incidence(cuba_incidence_function_data$Date)
+
+cuba_incidence_peak <- incidence::find_peak(cuba_incidence_object)
+
+png(filename = "../output/Rplot003.png", width = 600, height = 480, units = "px")
+plot(cuba_incidence_object) + geom_vline(xintercept = cuba_incidence_peak, 
+    col = "red", lty = 2) + labs(title = "Daily incidence of lab-confirmed cases, Cuba", 
+    subtitle = "(red line indicates date of peak incidence)")
+dev.off()
+```
+
+![](../output/Rplot003.png){ width=80% }
+
+
+It seams that the epidemic is still growing. 
+
+We are fitting a exponential model to incidence data of the form: $$log(y) = r * t + b$$ .
+
+The idea here is to fit two exponential models: One for the time before the peak, another for the decay phase after the peak. The peak that we found before `r cuba_incidence_peak ` , is probably a local maximim. (Maybe too early for this epidemic)
+
+## Incidence fit 
+
+```{r  Cuba_inc_fit,echo=FALSE, message=FALSE, warning=FALSE, tidy=TRUE, fig.height=12, fig.width=8, layout="l-body-outset"}
+cuba_incidence_fit <- incidence::fit(cuba_incidence_object, 
+    split = cuba_incidence_peak)
+
+# plot the incidence data and the model fit
+png(filename = "../output/Rplot004.png", width = 600, height = 480, units = "px")
+plot(cuba_incidence_object) %>% incidence::add_incidence_fit(cuba_incidence_fit) + 
+    labs(title = "Observed and modelled incidence of COVID-19 cases", 
+        subtitle = "Cuba, 2020")
+dev.off()
+```
+
+![](../output/Rplot004.png){ width=80% }
+
+## Estimating the reproduction number from log-linear models
+
+The Reproduction number is estimated from the growth rate obtained from a log-linear regression of incidence data, following the approach described in Wallinga and Lipsitch (2007, Proc Roy Soc B 274:599–604) for empirical distributions. The shape and scale parameters of the gamma distribution from the Serial Interval (SI) are reparameterized using mean and std. dev as per the results from Li et al.2020 ( Early Transmission Dynamics in Wuhan, China,  of Novel Coronavirus–Infected Pneumonia, DOI: 10.1056/NEJMoa2001316 ). Li et al. estimated a mean SI = 7.5 days, standard dev. = 3.4 days. We can use our own data here.
+
+For this we are using these packages:
+ 
+* epitrix package (authored by Thibaut Jombart and Anne Cori (2019). epitrix: Small 
+  Helpers and Tricks for Epidemics Analysis. R package version 0.2.2.
+  https://CRAN.R-project.org/package=epitrix). 
+* distcrete package (authored by Rich FitzJohn, Anne Cori and Thibaut Jombart (2017). 
+  distcrete: Discrete Distribution Approximations. R package version 1.0.3.
+  https://CRAN.R-project.org/package=distcrete)
+* incidence package (authored by Thibaut Jombart, Zhian N. Kamvar, Rich FitzJohn, 
+  Jun Cai, Sangeeta Bhatia, Jakob Schumacher and Juliet R.C. Pulliam (2019). incidence: 
+  Compute, Handle, Plot and Model Incidence of Dated Events. R package version 1.7.0. 
+  URL https://doi.org/10.5281/zenodo.2584018)
+
+
+```{r Cuba_growth_RO_dist, echo=FALSE, message=FALSE, warning=FALSE, tidy=TRUE, fig.height=12, fig.width=8, layout="l-body-outset"}
+library (distcrete ); library(epitrix)
+
+mu <- 7.5     # days  CU: 5.96
+sigma <- 3.4  # days  CU: 2.80
+param <- gamma_mucv2shapescale(mu, sigma/mu)
+
+w <- distcrete("gamma", interval = 1, shape = param$shape, scale = param$scale, 
+    w = 0)
+
+growth_R0 <- lm2R0_sample(cuba_incidence_fit$before$model, w)
+png(filename = "../output/Rplot005.png", width = 600, height = 480, units = "px")
+hist(growth_R0, col = "grey", border = "white", main = "Distribution of R0")
+dev.off()
+```
+
+![](../output/Rplot005.png){ width=80% }
+
+
+```{r Cuba_growth_RO_summary, echo=FALSE, message=FALSE, warning=FALSE, tidy=TRUE, fig.height=12, fig.width=8, layout="l-body-outset"}
+summary(growth_R0) # 2.38
+```
+
+So far we have an average Reproduction number of `r unname( summary( growth_R0 ) ["Mean"]) ` of the initial phase.
+
+
+If we use our own empirical estimates of the Serial Interval:
+
+```{r Cuba_growth_RO_dist_SI_CU, echo=FALSE, message=FALSE, warning=FALSE, tidy=TRUE, fig.height=12, fig.width=8, layout="l-body-outset"}
+library (distcrete ); library(epitrix)
+
+mu <- 5.96    # 7.5 # days  CU: 5.96
+sigma <- 2.80 # 3.4  # days  CU: 2.80
+param <- gamma_mucv2shapescale(mu, sigma/mu)
+
+w <- distcrete("gamma", interval = 1, shape = param$shape, scale = param$scale, 
+    w = 0)
+
+growth_R0_cu <- lm2R0_sample(cuba_incidence_fit$before$model, w)
+png(filename = "../output/Rplot006.png", width = 600, height = 480, units = "px")
+hist(growth_R0_cu, col = "grey", border = "white", main = "Distribution of R0")
+dev.off()
+```
+
+![](../output/Rplot006.png){ width=80% }
+
+
+```{r Cuba_growth_RO_SI_CU_summary, echo=FALSE, message=FALSE, warning=FALSE, tidy=TRUE, fig.height=12, fig.width=8, layout="l-body-outset"}
+summary(growth_R0_cu) # 2.38
+```
+
+Now the reproduction number of the initial phase decreases a bit `r unname( summary( growth_R0_cu ) ["Mean"]) ` but seams more realistic.

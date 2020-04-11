@@ -1,0 +1,13 @@
+Package: covid19cu
+Title: Data Analysis of Covid-19 cases from Cuba,2020
+Version: 0.0.0.9000
+Authors@R: 
+    person(given = "Waldemar",
+           family = "Baldoquín Rodríguez",
+           role = c("aut", "cre"),
+           email = "wbadoquin@gmail.com",
+           comment = c(ORCID = "YOUR-ORCID-ID"))
+Description: We are sharing here a few preliminary analysis of public Covid-19 data from Cuba.
+License: What license it uses
+Encoding: UTF-8
+LazyData: true
